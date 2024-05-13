@@ -1,0 +1,140 @@
+---
+title: "ml final project"
+author: "JIAYI XU"
+date: "2024/4/25"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r}
+library(Hmisc)
+library(tidyverse)
+library(r02pro)
+library(caret)
+library(tree)
+library(caret)
+library(MASS)
+library(ISLR)
+library(pROC)
+library(randomForest)
+house <- read.csv("housing.csv")
+house <- na.omit(house)
+
+# recode of the ocean_proximity
+house$ocean_proximity[house$ocean_proximity == "INLAND"] <- 1
+house$ocean_proximity[house$ocean_proximity == "NEAR BAY"] <- 2
+house$ocean_proximity[house$ocean_proximity == "NEAR OCEAN"] <- 3
+house$ocean_proximity[house$ocean_proximity == "<1H OCEAN"] <- 4
+house$ocean_proximity[house$ocean_proximity == "ISLAND"] <- 4
+
+# creat the train and test data
+# training data 80%, test data 20%
+tr_ind <- 1:(nrow(house)/5)
+train <- house[-tr_ind, ]
+test <- house[tr_ind, ]
+
+# the outcome is median house value (continuous)
+# the exposure is housing_median_age, total rooms, total bedrooms, population, median_income, ocean_proximity.
+hist.data.frame(house)
+```
+
+simple model like linear regression model
+```{r}
+fit <- lm(median_house_value ~ housing_median_age + total_rooms + households + total_bedrooms + population + median_income + ocean_proximity + longitude + latitude, data = train)
+summary(fit)
+summary(fit)$r.squared
+
+#train error
+predict_tr <- predict(fit, newdata = train)
+train_error <- sum((predict_tr - train$median_house_value)^2)
+train_error
+
+#test error
+predict_te <- predict(fit, newdata = test)
+test_error <- sum((predict_te - test$median_house_value)^2)
+test_error
+```
+
+KNN regression
+```{r}
+K <- 11
+n_all <- nrow(house)
+fold_ind <- sample(1:K, n_all, replace = TRUE)
+K_seq <- seq(from = 1, to = 50, by = 1)
+CV_error_seq <- sapply(K_seq, function(K_cur){
+  mean(sapply(1:K, function(j){
+ fit_knn <- knnreg(median_house_value ~ housing_median_age + total_rooms + households + total_bedrooms + population + median_income + ocean_proximity + longitude + latitude, data = house[fold_ind != j, ], k = K_cur)
+ pred_knn <- predict(fit_knn, newdata = house[fold_ind == j, ])
+ mean((house$median_house_value[fold_ind == j] - pred_knn)^2)
+}))
+})
+
+knn_re <- data.frame(K = K_seq, CV_error = CV_error_seq)
+mytheme <- theme(axis.title = element_text(size = 30),
+        axis.text = element_text(size = 20),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 20))
+ggplot(knn_re, mapping = aes(x = K, y = CV_error)) +
+  geom_point(size = 2) +
+  geom_line(size = 2) +
+  mytheme
+```
+
+```{r}
+fit_knn <- knn3(median_house_value ~ housing_median_age + total_rooms + households + total_bedrooms + population + median_income + ocean_proximity + longitude + latitude, data = train, k = 25)
+pred_knntr <- predict(fit_knn, newdata = train)
+mean((train$median_house_value - pred_knntr)^2)
+pred_knnte <- predict(fit_knn, newdata = test)
+mean((test$median_house_value - pred_knnte)^2)
+```
+
+
+Decision Tree
+```{r}
+tree <- tree(median_house_value ~ housing_median_age + total_rooms + households + total_bedrooms + population + median_income + ocean_proximity + longitude + latitude
+, data = train)
+set.seed(0)
+cv.sal <- cv.tree(tree)
+cv.sal_df <- data.frame(size = cv.sal$size, deviance = cv.sal$dev)
+best_size <- cv.sal$size[which.min(cv.sal$dev)]
+tree.final <- prune.tree(tree, best = best_size)
+ggplot(cv.sal_df, mapping = aes(x = size, y = deviance)) + 
+  geom_point(size = 3) + 
+  geom_line() +
+  geom_vline(xintercept = best_size, col = "red")
+plot(tree.final)
+text(tree.final)
+
+# train MSE
+yhat_train <- predict(tree, newdata = train)
+sal.train <- train$median_house_value
+mean((yhat_train - sal.train)^2)
+
+# test MSE
+yhat_test <- predict(tree, newdata = test)
+sal.test <- test$median_house_value
+mean((yhat_test - sal.test)^2)
+
+
+```
+
+Random Forest
+```{r}
+set.seed(1)
+rf.sal <- randomForest(median_house_value ~ housing_median_age + total_rooms + households + total_bedrooms + population + median_income + ocean_proximity + longitude + latitude,
+data = train,
+importance = TRUE)
+
+# train MSE
+yhat.rf_train <- predict(rf.sal, newdata = train)
+mean((yhat.rf_train - train$median_house_value)^2)
+
+# test MSE
+yhat.rf_test <- predict(rf.sal, newdata = test)
+mean((yhat.rf_test - test$median_house_value)^2)
+
+importance(rf.sal)
+varImpPlot(rf.sal)
+
+```
